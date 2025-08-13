@@ -13,11 +13,13 @@
 
 ## 📜 Overview
 
-Samsung’s **Reactivation Lock** was designed to deter theft by requiring the original Samsung account credentials after a factory reset.  
-On flagship devices like the **Galaxy S5 G900 series**, this lock state was stored in **Qualcomm’s Secure Execution Environment (QSEE)**, making it more resilient to basic bypass attempts.
+Samsung’s **Reactivation Lock** deters theft by requiring the original Samsung account after a factory reset.  
+On the **Galaxy S5 G900 series**, the lock state was anchored in **Qualcomm’s Secure Execution Environment (QSEE)** secure storage.
 
-This repository documents a method that worked **only on Engineering (ENG) builds** of certain legacy Samsung devices.  
-The bypass short-circuits the normal verification flow before the TEE is consulted, allowing the device to boot as “unlocked.”
+On certain **Engineering (ENG) builds**, the normal‑world library `libterrier.so` performed an additional, device‑binding acceptance check **before** forwarding an unlock request to the TEE trustlet.  
+A historical patch relaxed that pre‑check so a **server‑signed response** could be forwarded to the trustlet, which then **authoritatively cleared** the secure lock flag. **The signed blob still had to be valid** — the patch did **not** replace the trustlet’s verification.
+
+> After a successful clear, restoring the original `libterrier.so` leaves the device unlocked because the TEE’s secure storage state has changed.
 
 ---
 
@@ -31,78 +33,6 @@ On these legacy builds, reactivation lock requests flowed through a userspace li
 A signature verification API was invoked during this flow, and its boolean result propagated up to a system service that completed the workflow. Allowing a valid hash to be reused to remove reactivation lock.
 
 ---
-
-## High-Level Flow
-
-```mermaid
-graph TD
-    A[AT+REACTIVE request through modem call] --> B[Userspace Library: libterrier.so]
-    B --> C[Signature Verification via EVP_PKEY-style API]
-    C --> D[Boolean Verdict: True / False]
-    D --> E[Java_com_android_server_ReactiveService_nativeSessionComplete]
-    E --> F[Reactivation Lock Decision]
-```
-
-## 🔍 Reactivation Lock Verification Flow (Retail Firmware)
-
-![Verification Flow](docs/verification_flow.png)
-
-**Key points:**
-- Retail firmware queries **QSEE** to confirm lock state.  
-- Lock state in secure storage **survives** partition wipes.  
-- Only exploitable in ENG builds where signature verification is relaxed.
-
----
-
-## 🆚 G900 vs. Newer Budget Devices
-
-![G900 vs Budget Devices](docs/g900_vs_budget.png)
-
----
-
-### Why This Matters
-- **G900 series:** Hardware-backed QSEE storage meant lock survived wipes.  
-- **Budget devices:** Some dropped TEE storage, using raw partitions instead, making them vulnerable to a “wipe-to-unlock” method.  
-- **Lesson:** Even with TEE, if normal world checks can be patched, the secure world may never be consulted.
-
----
-
-## 🛠 ENG Build Patch Flow (Bypass Method)
-
-![Patch Flow](docs/patch_flow.png)
-
----
-
-## 🔧 ENG Build Process (Historical)
-
-1. **Obtain ENG root firmware** for the target device.  
-2. **Pull** `libterrier.so` from `/system/lib/`.  
-3. **Identify** the verification function in IDA or Ghidra that calls `EVP_PKEY_verify`.  
-4. **Patch** the instruction to force a successful return (e.g., change `MOVS R6, #0x11` to `MOVS R0, #1`).  
-5. **Push** the patched library back to the device.  
-6. **Restart** the framework or reboot.  
-7. **Send** the appropriate AT unlock command via modem:  
-   ```
-   AT+REACTIVE=2,0,<HASH_PLACEHOLDER>
-   AT+REACTIVE=2,1,<HASH_PLACEHOLDER>
-   ```
-8. **Restore** original `libterrier.so` after testing.
-
----
-
-## ⚠️ Legal & Ethical Notice
-
-- This method was only possible on **engineering/debug builds** where security was intentionally relaxed.  
-- Attempting to use similar methods on retail devices is not feasible without significant additional exploitation.  
-- Modern Samsung devices implement full secure boot + hardware key attestation, making this approach obsolete.
-
----
-
-## 📚 References
-
-- [Qualcomm QSEE Overview](https://developer.qualcomm.com/software/secure-execution-environment)  
-- [Samsung Knox Platform](https://www.samsungknox.com)  
-- [GlobalPlatform TEE Standard](https://globalplatform.org/specs-tee/)
 
 ## Goal
 
@@ -141,6 +71,55 @@ We targeted the library that handles authentication using AT commands over the m
 ![IDA patch view](docs/ida-patch.png)
 
 ---
+## 🔐 Challenge–Response Protocol (High Level)
+
+**Normal flow (retail logic simplified):**
+1. Host issues a **trigger check**: `AT+REACTIVE=1,0,0`  
+   - Device returns whether Reactivation Lock is triggered.
+2. Host sends a **challenge**: `AT+REACTIVE=2,0,<RANDOM_NONCE>`  
+   - Device derives a **device‑unique response** from that nonce and returns it.
+3. Backend server validates **IMEI/SN** against the device’s response and returns a **signed blob** bound to the transaction: `<SIGNED_BLOB>`
+4. Host submits the signed result: `AT+REACTIVE=2,1,<SIGNED_BLOB>`  
+   - `libterrier.so` accepts, forwards to the **QSEE trustlet**.
+   - **Trustlet verifies** the blob and, if valid, **clears** the lock flag in secure storage.
+
+**ENG patch behavior:**
+- The patch **relaxes libterrier’s local acceptance** (which normally enforces additional device‑binding checks) so that a **valid Samsung‑signed blob** is accepted and forwarded to the trustlet even if the local check would have rejected it.  
+- The **trustlet still verifies** the cryptographic validity. Invalid blobs are not honored.
+
+> The signed blob must be **server‑generated and valid**. The patch cannot fabricate a valid signature or bypass the trustlet’s verification.
+
+---
+
+## 🖼 Diagrams
+
+### Retail Verification Flow
+![Verification Flow](verification_flow.png)
+
+### G900 vs. Newer Budget Devices
+![G900 vs Budget Devices](g900_vs_budget.png)
+
+### ENG Build Patch Flow (Patched still calls TEE)
+![Patched Flow](patch_flow.png)
+
+### Challenge–Response Sequence (Conceptual)
+![Challenge–Response](challenge_response_flow.png)
+
+---
+
+## ⚠️ Notes & Boundaries
+
+- This repository **does not** distribute keys, opcodes, or server secrets. All concrete values are shown as placeholders like `<RANDOM_NONCE>` and `<SIGNED_BLOB>`.
+- This is a **historical** reference documenting observed behavior on **ENG** builds and why retail devices resisted simple partition wipes.
+- Modern devices and current firmware typically enforce stronger end‑to‑end, TEE‑anchored flows and hardware attestation.
+
+---
+
+## 📚 References
+
+- Qualcomm Secure Execution Environment (QSEE) — high‑level overviews  
+- Samsung Knox Platform — public security architecture summaries  
+- GlobalPlatform TEE Standards
 
 ## Repository Structure
 
@@ -209,29 +188,38 @@ Bypassing device protections on hardware you do not own or without explicit auth
 
 ---
 
+
 ## Why and How This Worked (Conceptual)
 
-**Why it worked on legacy builds**
-- **Trust boundary issue:** The authentication verdict originated in a userspace library modifiable under engineering/debug configurations.
-- **Lack of hardware-backed attestation:** Verification results were not bound to a TEE/Secure Element attestation token in these cases, so higher-level services trusted a software-computed boolean.
-- **Boot integrity assumptions:** Where Verified Boot or rollback protections were absent or relaxed, replacing userspace components was possible in lab conditions.
+**Why it worked on legacy ENG/debug builds**  
+- **Trust boundary gap in normal world:** The initial acceptance check was performed in `libterrier.so`, a userspace library replaceable on engineering/debug firmware.  
+- **Pre-TEE gating:** Even though the **QSEE trustlet** ultimately verified the signature and cleared the lock, `libterrier.so` had its own device-binding acceptance logic that could reject otherwise valid, Samsung-signed blobs.  
+- **Patch effect:** The ENG patch relaxed this local acceptance, allowing any syntactically correct challenge/response pair with a **valid Samsung-signed blob** (even if not specific to the device) to reach the trustlet for final verification.  
+- **No hardware-bound attestation at this stage:** On these builds, the acceptance boolean from `libterrier.so` was not cryptographically bound to a TEE attestation token, so higher-level services trusted the patched verdict.  
 
-**Conceptual flow**
-1. Modem-facing service receives a reactivation request (e.g., AT-style messaging).
-2. Userspace library parses the message and calls a signature verification API.
-3. Library normalizes the outcome to a boolean and forwards to a system service.
-4. System service proceeds only when verdict is `true`.
-5. Even with a forced `true`, the AT command had to be syntactically valid.
+**Conceptual flow (patched ENG build)**  
+1. **Trigger Check:** Host sends `AT+REACTIVE=1,0,0` to query lock state.  
+2. **Challenge:** Host sends `AT+REACTIVE=2,0,<RANDOM_NONCE>`.  
+   - Device computes a device-unique response from the nonce.  
+3. **Server Verification:** Host forwards the device’s response + IMEI/SN to Samsung’s backend.  
+   - Server validates and returns `<SIGNED_BLOB>` bound to the challenge.  
+4. **Unlock Request:** Host sends `AT+REACTIVE=2,1,<SIGNED_BLOB>`.  
+5. **Patched Acceptance:** `libterrier.so` accepts the signed blob without rejecting based on device-specific checks, and forwards to the TEE trustlet.  
+6. **TEE Verification:** Trustlet verifies signature/parameters and, if valid, clears the secure lock flag in QSEE storage.  
+7. **Persistence:** Lock remains cleared even after restoring the original `libterrier.so`.
 
-**Preconditions**
-- Physical control of a test device and ability to run an ENG/debug build.
-- Ability to replace userspace components.
-- Understanding of call sites and data flow to validate behavior.
+**Preconditions**  
+- Physical possession of the device.  
+- ENG/debug firmware allowing userspace component replacement.  
+- Knowledge of patch location in `libterrier.so`.  
+- Access to a **valid Samsung-signed blob** generated via legitimate server interaction.  
 
-**Limitations**
-- Not applicable to modern devices where authentication verdicts are hardware-attested.
-- Malformed or mismatched inputs were still rejected downstream.
+**Limitations**  
+- **Still requires** a genuine Samsung-signed blob; cannot fabricate or guess one.  
+- Invalid or malformed blobs are rejected by the TEE trustlet.  
+- Not applicable to modern retail builds where verdicts are hardware-attested and normal-world bypasses cannot alter secure world decisions.  
 
 ---
 
-**Disclaimer:** All sensitive values have been replaced with placeholders. Fill in only in a secure, authorized laboratory environment.
+**Disclaimer:** All sensitive values have been replaced with placeholders. This information is for historical, educational analysis in an authorized lab environment only.  
+
