@@ -1,0 +1,24 @@
+ASCII Flow Diagram
+==================
+
++-------------------+
+|  AT+REACTIVE cmd  |
++---------+---------+
+          |
+          v
++-----------------------------+
+| userspace lib (legacy)      |
+|  - parses request           |
+|  - calls EVP_PKEY_verify()  |
++-------------+---------------+
+              |
+              v
+   boolean verdict (T/F)
+              |
+              v
++-----------------------------------------------+
+| Java_com_android_server_ReactiveService_*     |
+| - consumes verdict                            |
+| - proceeds with lock decision                 |
++-----------------------------------------------+
+Legacy-Samsung-Reactivation-Lock-Removal
