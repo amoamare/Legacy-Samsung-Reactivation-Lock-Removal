@@ -1,8 +1,5 @@
 # Reactivation Lock Case Study on Legacy Samsung Devices
 
-> **Notice:** This document is for internal, authorized laboratory testing on legacy Samsung devices.  
-> All sensitive values (hashes, opcodes, addresses) are replaced with placeholders for safe publication.
-
 ## Devices Observed (ENG-Kernel Lab Builds)
 
 - G870A
