@@ -94,22 +94,85 @@ We targeted the library that handles authentication using AT commands over the m
 ## 🖼 Diagrams
 
 ### Retail Verification Flow
-![Verification Flow](verification_flow.png)
+![Verification Flow](/docs/verification_flow.png)
+
+```mermaid
+flowchart TD
+    A[Boot Device] --> B[Android Framework]
+    B --> C[Reactivation Lock Service]
+    C --> D[libterrier.so — Verification Gate]
+    D --> E[QSEE Trustlet: secure_storage/keymaster]
+    E --> F[TEE Secure Storage Check]
+    F --> G{Lock State?}
+    G -->|Locked| H[Prompt Samsung Login]
+    G -->|Unlocked| I[Boot to Home Screen]
+```
 
 ### G900 vs. Newer Budget Devices
-![G900 vs Budget Devices](g900_vs_budget.png)
+![G900 vs Budget Devices](/docs/g900_vs_budget.png)
+
+
+```mermaid
+flowchart LR
+    subgraph G900["Galaxy S5 G900 (TEE-anchored)"]
+        a1[RL Service] --> a2[libterrier.so Gate]
+        a2 --> a3[TEE Trustlet]
+        a3 --> a4{Lock?}
+        a4 -->|Yes| a5[Prompt Login]
+        a4 -->|No| a6[Boot Normally]
+    end
+    subgraph Budget["Newer Budget (no TEE for lock)"]
+        b1[RL Service] --> b2[Read Flag from eMMC]
+        b2 --> b3{Flag?}
+        b3 -->|Present| b4[Prompt Login]
+        b3 -->|Erased| b5[Boot Normally]
+    end
+```
 
 ### ENG Build Patch Flow (Patched still calls TEE)
-![Patched Flow](patch_flow.png)
+![Patched Flow](/docs/patch_flow.png)
+
+
+```mermaid
+flowchart TD
+    A[libterrier.so — Patched Acceptance] --> B[QSEE Trustlet — Verify Signed Blob]
+    B --> C[Secure Storage — Clear RL Flag]
+    C --> D[State Persists — Restore Original lib]
+    D --> E[Boot to Home Screen]
+```
+
 
 ### Challenge–Response Sequence (Conceptual)
-![Challenge–Response](challenge_response_flow.png)
+![Challenge–Response](/docs/challenge_response_flow.png)
+
+```mermaid
+sequenceDiagram
+    participant Host as Host/Tool
+    participant Dev as Device (libterrier.so)
+    participant TEE as QSEE Trustlet
+    participant Srv as Backend Server
+
+    Host->>Dev: AT+REACTIVE=1,0,0 (trigger check)
+    Dev-->>Host: Triggered?
+
+    Host->>Dev: AT+REACTIVE=2,0,<RANDOM_NONCE>
+    Dev-->>Host: Device-derived response
+
+    Host->>Srv: Response + IMEI/SN
+    Srv-->>Host: <SIGNED_BLOB> (Samsung-signed)
+
+    Host->>Dev: AT+REACTIVE=2,1,<SIGNED_BLOB>
+    Note over Dev: Patched acceptance (ENG) of valid blob
+    Dev->>TEE: Forward blob for verification
+    TEE-->>Dev: Verify OK
+    TEE->>Dev: Clear lock in secure storage
+    Dev-->>Host: Success (Unlocked)
+```
 
 ---
 
 ## ⚠️ Notes & Boundaries
 
-- This repository **does not** distribute keys, opcodes, or server secrets. All concrete values are shown as placeholders like `<RANDOM_NONCE>` and `<SIGNED_BLOB>`.
 - This is a **historical** reference documenting observed behavior on **ENG** builds and why retail devices resisted simple partition wipes.
 - Modern devices and current firmware typically enforce stronger end‑to‑end, TEE‑anchored flows and hardware attestation.
 
