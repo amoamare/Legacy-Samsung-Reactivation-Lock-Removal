@@ -1,4 +1,4 @@
-![Legacy Samsung Reactivation Lock Removal](https://github.com/amoamare/Legacy-Samsung-Reactivation-Lock-Removal/blob/main/docs/opengraph.png)
+![Legacy Samsung Reactivation Lock Removal](https://github.com/amoamare/Legacy-Samsung-Reactivation-Lock-Removal/blob/main/docs/opengraph.jpg)
 # Reactivation Lock Case Study on Legacy Samsung Devices
 
 ## Devices Observed (ENG-Kernel Lab Builds)
